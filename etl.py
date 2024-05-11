@@ -10,12 +10,12 @@ import io
 import boto3
 from dotenv import dotenv_values
 dotenv_values()
-from util import get_api_credential, get_redshift_connection, execute_sql
+from util import get_api_credentials, get_redshift_connection, execute_sql
 
 
 config = dotenv_values('.env')
-api_id = get_api_credential()[0]
-api_key = get_api_credential()[1]
+api_id = get_api_credentials()[0]
+api_key = get_api_credentials()[1]
 url = 'https://xecdapi.xe.com/v1/convert_from.json/?from=USD&to=NGN,GHS,KES,UGX,MAD,EGP,XAF&amount=1'
 # conn = get_redshift_connection()
 
@@ -103,4 +103,34 @@ def transform_data (bucket_name, data_staging_path):
     except Exception as e:
         print(f"Error writting CSV file to S3: {e}")
         
-transform_data (bucket_name, data_staging_path)
+
+#data from transformed layer is laoded to REDSHIFT
+def load_to_redshift(transformed_data, bucket_name):
+    '''
+    This function reads transformed fx rate data from a folder in S3 bucket then loads it
+    into redshift.
+    Parameters: Takes no parameter
+    Return value: Does not return a value
+    Return type: None  
+    '''
+    table_name = 'job_data'
+    bucket = bucket_name
+    path = transformed_data
+    #the object list in the transformed folder is called here
+    objects_list = s3_client.list_objects(Bucket = bucket, Prefix = path) # List the objects in the bucket
+    file = objects_list.get('Contents')[1]
+    object_key = file.get('Key') # Get file path or key
+    s3_path = f's3://{bucket}/{object_key}' # Replace this with your file path (bucket name, folder & file name)
+    iam_role = config.get('IAM_ROLE')
+    conn = get_redshift_connection()
+    #A copy query to copy csv files from S3 bucket to Redshift.
+    copy_query = f"""
+    copy {table_name}
+    from '{s3_path}'
+    IAM_ROLE '{iam_role}'
+    csv
+    IGNOREHEADER 1;
+    """
+    execute_sql(copy_query, conn)
+    print('Data successfully loaded to Redshift')
+load_to_redshift(transformed_data, bucket_name)
